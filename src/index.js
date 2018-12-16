@@ -1,10 +1,11 @@
 import "./style";
 import { Component, render } from "preact";
 import { chunk } from "lodash";
+import WorkerPool from "./workerPool";
 
 const CANVAS_SIZE = 500;
-
-const SQUARE_SIZE = 50;
+const SQUARE_SIZE = 40;
+const workerPool = new WorkerPool("workermabob.js", 50);
 
 export default class App extends Component {
   state = {
@@ -22,32 +23,8 @@ export default class App extends Component {
     return chunk(values, 4).map(c => `rgba(${c.join(",")})`);
   };
 
-  getMostPopularColorForSquare = squareData => {
-    const groupedColors = squareData.reduce((prev, val) => {
-      if (prev[val]) {
-        prev[val].push(val);
-      } else {
-        prev[val] = [val];
-      }
-      return prev;
-    }, {});
-
-    let mostPopularColor = null;
-
-    Object.entries(groupedColors).map(([key, val]) => {
-      if (!mostPopularColor) {
-        mostPopularColor = {
-          key,
-          length: val.length
-        };
-      } else if (mostPopularColor.length < val.length) {
-        mostPopularColor = {
-          key,
-          length: val.length
-        };
-      }
-    });
-    return mostPopularColor.key;
+  getMostPopularColorForSquare = (squareData, x, y) => {
+    workerPool.postMessage(JSON.stringify({ squareData, x, y }));
   };
 
   analyseCanvas = () => {
@@ -58,13 +35,25 @@ export default class App extends Component {
         const pixelData = ctx.getImageData(i, j, SQUARE_SIZE, SQUARE_SIZE).data;
         const rgbaPixels = this.getRgba(pixelData);
 
-        const mostPopularColor = this.getMostPopularColorForSquare(rgbaPixels);
-
-        const ctx2 = this.canvas2.getContext("2d");
-        ctx2.fillStyle = mostPopularColor;
-        ctx2.fillRect(i, j, SQUARE_SIZE, SQUARE_SIZE);
+        this.getMostPopularColorForSquare(rgbaPixels, i, j);
       }
     }
+  };
+
+  drawColoredSquareToCanvas = event => {
+    const { color, x, y } = JSON.parse(event.data);
+
+    const ctx = this.canvas2.getContext("2d");
+    ctx.fillStyle = color;
+    ctx.fillRect(x, y, SQUARE_SIZE, SQUARE_SIZE);
+    ctx.strokeStyle = "#ccc";
+    ctx.rect(x, y, SQUARE_SIZE, SQUARE_SIZE);
+    ctx.stroke();
+    ctx.beginPath();
+    const radius = (SQUARE_SIZE - 10) / 2;
+    const offset = SQUARE_SIZE / 2;
+    ctx.arc(x + offset, y + offset, radius, 0, 360);
+    ctx.stroke();
   };
 
   drawImageToCanvas = () => {
@@ -79,6 +68,7 @@ export default class App extends Component {
           width: img.naturalWidth
         },
         () => {
+          workerPool.registerOnMessage(this.drawColoredSquareToCanvas);
           ctx.drawImage(img, 0, 0);
           this.analyseCanvas();
         }
@@ -105,6 +95,7 @@ export default class App extends Component {
       <div>
         <input type="file" onChange={this.onChange} />
         <canvas
+          class="hidden"
           ref={c => (this.canvas = c)}
           height={this.state.height}
           width={this.state.width}
